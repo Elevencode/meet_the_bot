@@ -30,25 +30,21 @@ class GoogleAuthService:
         self.credentials = None
         self._service_account_path = None
     
-    def _get_service_account_path(self) -> Optional[str]:
-        """Get the path to the service account JSON file."""
-        if self._service_account_path:
-            return self._service_account_path
+    def _get_service_account_path(self) -> str:
+        """Get the path to the service account credentials file."""
+        # Try different possible locations
+        possible_paths = [
+            os.path.expanduser("~/credentials/meet_the_bot/service-account.json"),
+            os.path.join(os.path.dirname(__file__), "../../../credentials/service-account.json"),
+            os.path.join(os.path.dirname(__file__), "../../service-account.json"),
+            "service-account.json"
+        ]
         
-        # Try to get from environment variable first
-        from app.config import settings
-        if settings.google_service_account_path:
-            self._service_account_path = settings.google_service_account_path
-            return self._service_account_path
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
         
-        # Fallback to default location
-        default_path = os.path.expanduser("~/credentials/meet_the_bot/service-account.json")
-        if os.path.exists(default_path):
-            self._service_account_path = default_path
-            return self._service_account_path
-        
-        logger.error("Service account JSON file not found")
-        return None
+        return possible_paths[0]  # Return default path
     
     def get_credentials(self):
         """Get authenticated credentials for Google APIs."""
