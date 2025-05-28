@@ -1,21 +1,24 @@
-# Backend dependencies
-fastapi>=0.100.0
-uvicorn[standard]>=0.20.0
-pydantic>=2.4.0,<2.10.0
-pydantic-settings>=2.0.0
+# Backend Framework
+fastapi>=0.104.1
+uvicorn[standard]>=0.24.0
+
+# Environment and Configuration
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
 python-dotenv>=1.0.0
 
-# Google API dependencies
-google-api-python-client>=2.100.0
-google-auth>=2.20.0
-google-auth-oauthlib>=1.0.0
-google-auth-httplib2>=0.1.0
-google-apps-meet>=0.1.0
+# Google APIs
+google-api-python-client>=2.108.0
+google-auth>=2.23.4
+google-auth-oauthlib>=1.1.0
+google-auth-httplib2>=0.1.1
 
-# Telegram bot dependencies
-aiogram>=3.10.0
-aiohttp>=3.9.0,<3.11
+# Telegram Bot
+aiogram>=3.3.0
 
-# Utility dependencies
-requests>=2.30.0
-python-json-logger>=2.0.0 
+# HTTP Client for inter-service communication
+httpx>=0.25.2
+requests>=2.31.0
+
+# Additional utilities
+python-multipart>=0.0.6 

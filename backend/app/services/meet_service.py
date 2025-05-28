@@ -1,106 +1,213 @@
 """
-Google Meet service.
-Handles creation and management of Google Meet meeting spaces.
+Google Meet service using Google Calendar API.
+Since Google Meet API requires domain-wide delegation or user authentication,
+we use Calendar API to create events with Meet links instead.
 """
 
+import logging
 from typing import Optional, Dict, Any
-from google.apps import meet_v2
-from google.api_core.exceptions import GoogleAPIError
+from datetime import datetime, timedelta
+import uuid
 
-from app.services.google_auth import get_google_auth_service
-from app.core.logger import get_logger
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
-logger = get_logger(__name__)
+from .google_auth import GoogleAuthService
+
+logger = logging.getLogger(__name__)
 
 
-class MeetService:
-    """Service for Google Meet API operations."""
+class GoogleMeetService:
+    """Service for creating Google Meet links using Calendar API."""
     
     def __init__(self):
-        self.auth_service = get_google_auth_service()
+        """Initialize the Google Meet service."""
+        self.auth_service = GoogleAuthService()
+        self._calendar_service = None
     
-    def create_meeting_space(self) -> Optional[Dict[str, Any]]:
-        """
-        Create a new Google Meet meeting space.
+    def _get_calendar_service(self):
+        """Get authenticated Google Calendar service."""
+        if not self._calendar_service:
+            credentials = self.auth_service.get_credentials()
+            if not credentials:
+                raise Exception("Failed to get Google credentials")
+            
+            self._calendar_service = build('calendar', 'v3', credentials=credentials)
+            logger.info("Successfully created Google Calendar API client")
         
-        Returns:
-            Dict containing meeting space information or None if failed
-        """
-        try:
-            meet_client = self.auth_service.get_meet_client()
-            if not meet_client:
-                logger.error("Failed to get Google Meet client")
-                return None
-            
-            # Create a new meeting space
-            # According to the API docs, we can create an empty space
-            request = meet_v2.CreateSpaceRequest()
-            
-            logger.info("Creating new Google Meet space...")
-            space = meet_client.create_space(request=request)
-            
-            logger.info(f"Successfully created meeting space: {space.name}")
-            
-            # Extract the meeting URI and other useful information
-            meeting_info = {
-                "space_name": space.name,
-                "meeting_uri": space.meeting_uri,
-                "meeting_code": space.meeting_code,
-                "config": space.config,
-                "active_conference": space.active_conference
-            }
-            
-            return meeting_info
-            
-        except GoogleAPIError as e:
-            logger.error(f"Google Meet API error: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Failed to create meeting space: {e}")
-            return None
+        return self._calendar_service
     
-    def get_meeting_space(self, space_name: str) -> Optional[Dict[str, Any]]:
+    def create_meeting_link(self, 
+                          summary: Optional[str] = None,
+                          description: Optional[str] = None,
+                          duration_minutes: int = 60) -> Dict[str, Any]:
         """
-        Get information about a meeting space.
+        Create a Google Meet link by creating a calendar event.
         
         Args:
-            space_name: The name/ID of the meeting space
+            summary: Event title (optional)
+            description: Event description (optional)
+            duration_minutes: Duration of the meeting in minutes
             
         Returns:
-            Dict containing meeting space information or None if failed
+            Dict containing meeting information
         """
         try:
-            meet_client = self.auth_service.get_meet_client()
-            if not meet_client:
-                logger.error("Failed to get Google Meet client")
-                return None
+            logger.info("Creating Google Meet link via Calendar API...")
             
-            logger.info(f"Fetching meeting space: {space_name}")
-            request = meet_v2.GetSpaceRequest(name=space_name)
-            space = meet_client.get_space(request=request)
+            service = self._get_calendar_service()
             
-            meeting_info = {
-                "space_name": space.name,
-                "meeting_uri": space.meeting_uri,
-                "meeting_code": space.meeting_code,
-                "config": space.config,
-                "active_conference": space.active_conference
+            # Generate start time (current time + 1 minute to avoid immediate start)
+            start_time = datetime.utcnow() + timedelta(minutes=1)
+            end_time = start_time + timedelta(minutes=duration_minutes)
+            
+            # Create event with Google Meet conference
+            event = {
+                'summary': summary or 'Generated Meeting',
+                'description': description or 'Meeting created via Telegram bot',
+                'start': {
+                    'dateTime': start_time.isoformat() + 'Z',  # 'Z' indicates UTC time
+                },
+                'end': {
+                    'dateTime': end_time.isoformat() + 'Z',
+                },
+                'conferenceData': {
+                    'createRequest': {
+                        'requestId': str(uuid.uuid4()),  # Unique request ID
+                        'conferenceSolutionKey': {
+                            'type': 'hangoutsMeet'
+                        }
+                    }
+                }
             }
             
-            return meeting_info
+            # Create the event with conference data
+            created_event = service.events().insert(
+                calendarId='primary',
+                body=event,
+                conferenceDataVersion=1  # Required for conference data
+            ).execute()
             
-        except GoogleAPIError as e:
-            logger.error(f"Google Meet API error when fetching space: {e}")
-            return None
+            # Extract meeting information
+            conference_data = created_event.get('conferenceData', {})
+            entry_points = conference_data.get('entryPoints', [])
+            
+            # Find the video entry point (Google Meet link)
+            meeting_url = None
+            for entry_point in entry_points:
+                if entry_point.get('entryPointType') == 'video':
+                    meeting_url = entry_point.get('uri')
+                    break
+            
+            if not meeting_url:
+                raise Exception("No Google Meet link found in created event")
+            
+            result = {
+                'success': True,
+                'meeting_uri': meeting_url,
+                'meeting_id': created_event.get('id'),
+                'event_id': created_event.get('id'),
+                'conference_id': conference_data.get('conferenceId'),
+                'summary': created_event.get('summary'),
+                'start_time': created_event.get('start', {}).get('dateTime'),
+                'end_time': created_event.get('end', {}).get('dateTime'),
+                'html_link': created_event.get('htmlLink'),
+                'error': None
+            }
+            
+            logger.info(f"Successfully created Google Meet link: {meeting_url}")
+            return result
+            
+        except HttpError as e:
+            error_message = f"Google Calendar API error: {e.resp.status} {e.content.decode()}"
+            logger.error(error_message)
+            return {
+                'success': False,
+                'meeting_uri': None,
+                'meeting_id': None,
+                'event_id': None,
+                'conference_id': None,
+                'summary': None,
+                'start_time': None,
+                'end_time': None,
+                'html_link': None,
+                'error': error_message
+            }
         except Exception as e:
-            logger.error(f"Failed to get meeting space: {e}")
-            return None
+            error_message = f"Unexpected error creating Google Meet link: {str(e)}"
+            logger.error(error_message)
+            return {
+                'success': False,
+                'meeting_uri': None,
+                'meeting_id': None,
+                'event_id': None,
+                'conference_id': None,
+                'summary': None,
+                'start_time': None,
+                'end_time': None,
+                'html_link': None,
+                'error': error_message
+            }
+    
+    def get_meeting_info(self, event_id: str) -> Dict[str, Any]:
+        """
+        Get information about an existing calendar event with Meet link.
+        
+        Args:
+            event_id: Calendar event ID
+            
+        Returns:
+            Dict containing meeting information
+        """
+        try:
+            service = self._get_calendar_service()
+            
+            event = service.events().get(
+                calendarId='primary',
+                eventId=event_id
+            ).execute()
+            
+            conference_data = event.get('conferenceData', {})
+            entry_points = conference_data.get('entryPoints', [])
+            
+            meeting_url = None
+            for entry_point in entry_points:
+                if entry_point.get('entryPointType') == 'video':
+                    meeting_url = entry_point.get('uri')
+                    break
+            
+            return {
+                'success': True,
+                'meeting_uri': meeting_url,
+                'meeting_id': event.get('id'),
+                'conference_id': conference_data.get('conferenceId'),
+                'summary': event.get('summary'),
+                'start_time': event.get('start', {}).get('dateTime'),
+                'end_time': event.get('end', {}).get('dateTime'),
+                'html_link': event.get('htmlLink'),
+                'error': None
+            }
+            
+        except HttpError as e:
+            error_message = f"Google Calendar API error: {e.resp.status} {e.content.decode()}"
+            logger.error(error_message)
+            return {
+                'success': False,
+                'error': error_message
+            }
+        except Exception as e:
+            error_message = f"Unexpected error getting meeting info: {str(e)}"
+            logger.error(error_message)
+            return {
+                'success': False,
+                'error': error_message
+            }
 
 
 # Global instance
-meet_service = MeetService()
+meet_service = GoogleMeetService()
 
 
-def get_meet_service() -> MeetService:
+def get_meet_service() -> GoogleMeetService:
     """Get the global Meet service instance."""
     return meet_service 

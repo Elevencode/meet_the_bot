@@ -1,124 +1,144 @@
 """
-Google API authentication service.
-Handles service account authentication for Google Meet API.
+Google authentication service for Calendar API.
+Handles Service Account authentication to access Google Calendar API
+for creating events with Google Meet links.
 """
 
+import json
+import logging
 import os
 from typing import Optional
+
 from google.auth.transport.requests import Request
 from google.oauth2 import service_account
-from google.apps import meet_v2
+from googleapiclient.discovery import build
 
-from app.config import get_settings
-from app.core.logger import get_logger
-
-logger = get_logger(__name__)
-
-# Google Meet API scopes
-SCOPES = [
-    'https://www.googleapis.com/auth/meetings.space.created',
-]
+logger = logging.getLogger(__name__)
 
 
 class GoogleAuthService:
-    """Service for Google API authentication."""
+    """Handles Google API authentication using Service Account."""
+    
+    # Required scopes for Google Calendar API with Meet integration
+    SCOPES = [
+        'https://www.googleapis.com/auth/calendar.events',  # Calendar events management
+        'https://www.googleapis.com/auth/calendar'          # Full calendar access
+    ]
     
     def __init__(self):
-        self.settings = get_settings()
-        self._credentials = None
-        self._meet_client = None
+        """Initialize the authentication service."""
+        self.credentials = None
+        self._service_account_path = None
     
-    def _load_credentials(self) -> Optional[service_account.Credentials]:
-        """Load service account credentials from JSON file."""
-        if not self.settings.google_service_account_path:
-            logger.error("Google service account path not configured")
+    def _get_service_account_path(self) -> Optional[str]:
+        """Get the path to the service account JSON file."""
+        if self._service_account_path:
+            return self._service_account_path
+        
+        # Try to get from environment variable first
+        from app.config import settings
+        if settings.google_service_account_path:
+            self._service_account_path = settings.google_service_account_path
+            return self._service_account_path
+        
+        # Fallback to default location
+        default_path = os.path.expanduser("~/credentials/meet_the_bot/service-account.json")
+        if os.path.exists(default_path):
+            self._service_account_path = default_path
+            return self._service_account_path
+        
+        logger.error("Service account JSON file not found")
+        return None
+    
+    def get_credentials(self):
+        """Get authenticated credentials for Google APIs."""
+        if self.credentials and self.credentials.valid:
+            return self.credentials
+        
+        service_account_path = self._get_service_account_path()
+        if not service_account_path:
+            logger.error("Service account path not configured")
             return None
         
-        if not os.path.exists(self.settings.google_service_account_path):
-            logger.error(f"Service account file not found: {self.settings.google_service_account_path}")
+        if not os.path.exists(service_account_path):
+            logger.error(f"Service account file does not exist: {service_account_path}")
             return None
         
         try:
-            credentials = service_account.Credentials.from_service_account_file(
-                self.settings.google_service_account_path,
-                scopes=SCOPES
+            # Load service account credentials
+            self.credentials = service_account.Credentials.from_service_account_file(
+                service_account_path,
+                scopes=self.SCOPES
             )
-            logger.info("Successfully loaded service account credentials")
-            return credentials
+            
+            # Refresh credentials if needed
+            if not self.credentials.valid:
+                if self.credentials.expired and self.credentials.refresh_token:
+                    self.credentials.refresh(Request())
+            
+            logger.info("Successfully loaded and validated Google credentials")
+            return self.credentials
+            
         except Exception as e:
             logger.error(f"Failed to load service account credentials: {e}")
             return None
     
-    def get_credentials(self) -> Optional[service_account.Credentials]:
-        """Get authenticated credentials for Google API."""
-        if self._credentials is None:
-            self._credentials = self._load_credentials()
-        
-        if self._credentials and self._credentials.expired:
-            try:
-                self._credentials.refresh(Request())
-                logger.info("Refreshed expired credentials")
-            except Exception as e:
-                logger.error(f"Failed to refresh credentials: {e}")
-                return None
-        
-        return self._credentials
-    
-    def get_meet_client(self) -> Optional[meet_v2.SpacesServiceClient]:
-        """Get authenticated Google Meet API client."""
-        if self._meet_client is None:
-            credentials = self.get_credentials()
-            if not credentials:
-                return None
-            
-            try:
-                self._meet_client = meet_v2.SpacesServiceClient(credentials=credentials)
-                logger.info("Successfully created Google Meet API client")
-            except Exception as e:
-                logger.error(f"Failed to create Google Meet API client: {e}")
-                return None
-        
-        return self._meet_client
-    
     def test_authentication(self) -> dict:
-        """Test Google API authentication."""
+        """
+        Test Google API authentication.
+        
+        Returns:
+            Dict with authentication test results
+        """
         result = {
             "authenticated": False,
             "service_account_file_exists": False,
             "credentials_loaded": False,
-            "meet_client_created": False,
+            "calendar_client_created": False,
             "error": None
         }
         
         try:
             # Check if service account file exists
-            if self.settings.google_service_account_path:
-                result["service_account_file_exists"] = os.path.exists(
-                    self.settings.google_service_account_path
-                )
+            service_account_path = self._get_service_account_path()
+            result["service_account_file_exists"] = service_account_path and os.path.exists(service_account_path)
+            
+            if not result["service_account_file_exists"]:
+                result["error"] = f"Service account file not found at: {service_account_path}"
+                return result
             
             # Try to load credentials
             credentials = self.get_credentials()
-            if credentials:
-                result["credentials_loaded"] = True
-                
-                # Try to create Meet client
-                meet_client = self.get_meet_client()
-                if meet_client:
-                    result["meet_client_created"] = True
-                    result["authenticated"] = True
+            result["credentials_loaded"] = credentials is not None
+            
+            if not result["credentials_loaded"]:
+                result["error"] = "Failed to load service account credentials"
+                return result
+            
+            # Try to create Calendar API client
+            calendar_service = build('calendar', 'v3', credentials=credentials)
+            result["calendar_client_created"] = calendar_service is not None
+            
+            if not result["calendar_client_created"]:
+                result["error"] = "Failed to create Google Calendar API client"
+                return result
+            
+            # If we got here, authentication is successful
+            result["authenticated"] = True
+            logger.info("Google API authentication test successful")
             
         except Exception as e:
-            result["error"] = str(e)
-            logger.error(f"Authentication test failed: {e}")
+            error_msg = f"Authentication test failed: {str(e)}"
+            logger.error(error_msg)
+            result["error"] = error_msg
         
         return result
 
 
 # Global instance
-google_auth_service = GoogleAuthService()
+auth_service = GoogleAuthService()
 
 
 def get_google_auth_service() -> GoogleAuthService:
     """Get the global Google authentication service instance."""
-    return google_auth_service 
+    return auth_service 
