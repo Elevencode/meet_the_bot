@@ -19,11 +19,14 @@ class Settings(BaseSettings):
     # Google API configuration
     google_service_account_path: Optional[str] = None
     
+    # Telegram Bot configuration
+    telegram_bot_token: Optional[str] = None
+    
     # Logging configuration
     log_level: str = "INFO"
     
     model_config = {
-        "env_file": ".env",
+        "env_file": "../.env",  # Look for .env in project root
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
         "env_prefix": "",
