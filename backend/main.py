@@ -18,10 +18,12 @@ def main():
     """Main function to run the FastAPI server."""
     settings = get_settings()
     
-    logger.info("Starting server...")
+    # logger.info(f"Loaded settings: google_service_account_path='{settings.google_service_account_path}'") # Log it too
+
+    logger.info(f"Attempting to start server on {settings.host}:{settings.port} from main.py settings")
     
     uvicorn.run(
-        "app.main:app",
+        app,
         host=settings.host,
         port=settings.port,
         reload=settings.debug,

@@ -13,11 +13,12 @@ class Settings(BaseSettings):
     
     # Server configuration
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 8001
     debug: bool = False
     
     # Google API configuration
-    google_service_account_path: Optional[str] = None
+    google_service_account_path: str = "service-account.json"
+    google_impersonation_email: Optional[str] = None  # Email to impersonate for Meet creation
     
     # Telegram Bot configuration
     telegram_bot_token: Optional[str] = None
@@ -26,7 +27,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     
     model_config = {
-        "env_file": "../.env",  # Look for .env in project root
+        "env_file": "/Users/arthur/dev/meet_the_bot/.env",  # Absolute path to .env in project root
         "env_file_encoding": "utf-8",
         "case_sensitive": False,
         "env_prefix": "",

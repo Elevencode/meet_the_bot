@@ -9,10 +9,16 @@ python-dotenv>=1.0.0
 
 # Telegram Bot
 aiogram>=3.3.0
+aiohttp>=3.9.0
 
 # HTTP Client for inter-service communication
 httpx>=0.25.2
 requests>=2.31.0
 
 # Additional utilities
-python-multipart>=0.0.6 
+python-multipart>=0.0.6
+
+# Google API Integration
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib 
