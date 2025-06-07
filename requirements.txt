@@ -1,0 +1,5 @@
+# Python dependencies
+
+python-telegram-bot
+python-dotenv
+requests 

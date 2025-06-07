@@ -1,0 +1,12 @@
+# Ignore environment variables file
+.env
+
+# Python specific
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# IDE specific
+.idea/
+.vscode/ 
